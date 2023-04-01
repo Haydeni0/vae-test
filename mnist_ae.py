@@ -65,6 +65,7 @@ class MnistConvAe(nn.Module):
     def __init__(self):
         super(MnistConvAe, self).__init__()
 
+        # Is too much information being given away by the maxpool indices?
         self.pool = nn.MaxPool2d(2, 2, return_indices=True)
         self.unpool = nn.MaxUnpool2d(2, 2)
         self.conv1 = nn.Conv2d(1, 32, 3, padding="same")
@@ -76,7 +77,7 @@ class MnistConvAe(nn.Module):
         self.conv3 = nn.Conv2d(32, 32, 3, padding="same")
         self.conv4 = nn.Conv2d(32, 1, 3, padding="same")
 
-    def forward(self, x: torch.Tensor):
+    def encoder(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # [N, 1, 28, 28]
         x = F.relu(self.conv1(x))  # [N, 32, 28, 28]
         x, pool1_idx = self.pool(x)  # [N, 32, 14, 14]
@@ -85,16 +86,30 @@ class MnistConvAe(nn.Module):
         x = x.reshape(-1, 32 * 7 * 7)  # [N, 32*7*7]
         x = F.relu(self.fc1(x))  # [N, 50]
         x = F.relu(self.fc2(x))  # [N, 1]
+
+        return x, pool1_idx, pool2_idx
+    
+    def decoder(self, x: torch.Tensor, unpool1_idx: torch.Tensor, unpool2_idx: torch.Tensor) -> torch.Tensor:
+        # [N, 1]
         x = F.relu(self.fc3(x))  # [N, 50]
         x = F.relu(self.fc4(x))  # [N, 32*7*7]
         x = x.reshape(-1, 32, 7, 7)  # [N, 32, 7, 7]
-        x = self.unpool(x, pool2_idx)  # [N, 32, 14, 14]
+        x = self.unpool(x, unpool1_idx)  # [N, 32, 14, 14]
         x = F.relu(self.conv3(x))  # [N, 32, 14, 14]
-        x = self.unpool(x, pool1_idx)  # [N, 32, 28, 28]
-        x = F.relu(self.conv4(x))  # [N, 32, 28, 28] 
+        x = self.unpool(x, unpool2_idx)  # [N, 32, 28, 28]
+        x = F.relu(self.conv4(x))  # [N, 32, 28, 28]
 
         return x
 
+    def forward(self, x: torch.Tensor):
+        
+        x, pool1_idx, pool2_idx = self.encoder(x)
+        x = self.decoder(x, pool2_idx, pool1_idx)
+
+        self.pool1_idx = pool1_idx
+        self.pool2_idx = pool2_idx
+
+        return x
 
     def imgReshape(self, x: torch.Tensor) -> torch.Tensor:
         x = x.reshape(-1, 1, 28, 28)
@@ -122,7 +137,6 @@ for epoch in trange(num_epochs, desc="Epoch", position=0):
         train_bar.update(1)
         images = images.to(device)
         images = model.imgReshape(images)
-        labels = labels.to(device)
 
         outputs = model(images)
         loss = loss_fn(outputs, images)
@@ -148,13 +162,27 @@ model.eval()
 num_images = 10
 # Plot imput images compared to reconstructed images
 image = iter(test_loader).__next__()[0][:num_images].reshape(-1, 28, 28)
-predicted_image = model(model.imgReshape(image.to(device)))
+with torch.no_grad():
+    predicted_image = model(model.imgReshape(image.to(device)))
 fig, ax = plt.subplots(2, num_images)
 for img_idx in range(num_images):
     plt.subplot(2, num_images, img_idx + 1)
     plt.imshow(image[img_idx], cmap="gray")
     plt.subplot(2, num_images, num_images + img_idx + 1)
-    plt.imshow(predicted_image[img_idx].detach().cpu().reshape(28, 28), cmap="gray")
+    plt.imshow(predicted_image[img_idx].cpu().reshape(28, 28), cmap="gray")
+
+# %% Decode from a number
+
+model.eval()
+x = torch.tensor([[0.4]]).to(device)
+with torch.no_grad():
+    output = model.decoder(x, model.pool2_idx[1][None, :, :, :], model.pool1_idx[1][None, :, :, :])
+
+output = output.reshape(28, 28).cpu()
+
+plt.imshow(output, cmap="gray")
+
+
 
 # %% Visualise model
 from torchviz import make_dot
