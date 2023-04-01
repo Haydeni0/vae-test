@@ -34,6 +34,7 @@ train_loader, test_loader = my_loaders.mnist(BATCH_SIZE)
 image_size = 28 * 28
 num_classes = 10
 
+
 class MnistAe(nn.Module):
     def __init__(self):
         super(MnistAe, self).__init__()
@@ -44,7 +45,7 @@ class MnistAe(nn.Module):
         self.fc4 = nn.Linear(20, 80)
         self.fc5 = nn.Linear(80, 200)
         self.fc6 = nn.Linear(200, image_size)
-    
+
     def forward(self, x: torch.Tensor):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -59,7 +60,49 @@ class MnistAe(nn.Module):
         x = x.reshape(-1, image_size)
         return x
 
-model = MnistAe().to(device)
+
+class MnistConvAe(nn.Module):
+    def __init__(self):
+        super(MnistConvAe, self).__init__()
+
+        self.pool = nn.MaxPool2d(2, 2, return_indices=True)
+        self.unpool = nn.MaxUnpool2d(2, 2)
+        self.conv1 = nn.Conv2d(1, 32, 3, padding="same")
+        self.conv2 = nn.Conv2d(32, 32, 3, padding="same")
+        self.fc1 = nn.Linear(32 * 7 * 7, 50)
+        self.fc2 = nn.Linear(50, 1)
+        self.fc3 = nn.Linear(1, 50)
+        self.fc4 = nn.Linear(50, 32 * 7 * 7)
+        self.conv3 = nn.Conv2d(32, 32, 3, padding="same")
+        self.conv4 = nn.Conv2d(32, 1, 3, padding="same")
+
+    def forward(self, x: torch.Tensor):
+        # [N, 1, 28, 28]
+        x = F.relu(self.conv1(x))  # [N, 32, 28, 28]
+        x, pool1_idx = self.pool(x)  # [N, 32, 14, 14]
+        x = F.relu(self.conv2(x))  # [N, 32, 14, 14]
+        x, pool2_idx = self.pool(x)  # [N, 32, 7, 7]
+        x = x.reshape(-1, 32 * 7 * 7)  # [N, 32*7*7]
+        x = F.relu(self.fc1(x))  # [N, 50]
+        x = F.relu(self.fc2(x))  # [N, 1]
+        x = F.relu(self.fc3(x))  # [N, 50]
+        x = F.relu(self.fc4(x))  # [N, 32*7*7]
+        x = x.reshape(-1, 32, 7, 7)  # [N, 32, 7, 7]
+        x = self.unpool(x, pool2_idx)  # [N, 32, 14, 14]
+        x = F.relu(self.conv3(x))  # [N, 32, 14, 14]
+        x = self.unpool(x, pool1_idx)  # [N, 32, 28, 28]
+        x = F.relu(self.conv4(x))  # [N, 32, 28, 28] 
+
+        return x
+
+
+    def imgReshape(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.reshape(-1, 1, 28, 28)
+        return x
+
+
+# model = MnistAe().to(device)
+model = MnistConvAe().to(device)
 
 loss_fn = nn.MSELoss()
 optimiser = torch.optim.Adam(params=model.parameters(), lr=0.01)
@@ -111,7 +154,7 @@ for img_idx in range(num_images):
     plt.subplot(2, num_images, img_idx + 1)
     plt.imshow(image[img_idx], cmap="gray")
     plt.subplot(2, num_images, num_images + img_idx + 1)
-    plt.imshow(predicted_image[img_idx].detach().cpu().reshape(28,28), cmap="gray")
+    plt.imshow(predicted_image[img_idx].detach().cpu().reshape(28, 28), cmap="gray")
 
 # %% Visualise model
 from torchviz import make_dot
