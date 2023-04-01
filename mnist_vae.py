@@ -7,11 +7,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+
 # Run IPython magic commands
 from IPython.core.getipython import get_ipython
 from torch.utils.data import DataLoader
 from torchviz import make_dot
 from tqdm.auto import tqdm, trange
+
 
 import my_loaders
 
@@ -29,38 +31,87 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Encoder(nn.Module):
     def __init__(self, latent_dims):
         super(Encoder, self).__init__()
-        self.fc1 = nn.Linear(28 * 28, 200)
-        self.fc2 = nn.Linear(200, 500)
-        self.fc3 = nn.Linear(500, latent_dims)
+        self.fc1 = nn.Linear(28 * 28, 1024)
+        self.fc2 = nn.Linear(1024, 512)
+        self.fc3 = nn.Linear(512, 256)
+        self.fc4 = nn.Linear(256, latent_dims)
 
     def forward(self, x: torch.Tensor):
         x = torch.flatten(x, start_dim=1)
         x = F.gelu(self.fc1(x))
         x = F.gelu(self.fc2(x))
-        x = self.fc3(x)
+        x = F.gelu(self.fc3(x))
+        x = self.fc4(x)
 
         return x
+
+
+class VariationalEncoder(nn.Module):
+    def __init__(self, latent_dims):
+        super(VariationalEncoder, self).__init__()
+        self.fc1 = nn.Linear(28 * 28, 1024)
+        self.fc2 = nn.Linear(1024, 512)
+        self.fc3 = nn.Linear(512, 256)
+        self.fc4_mu = nn.Linear(256, latent_dims)
+        self.fc4_sigma = nn.Linear(256, latent_dims)
+
+        self.N = torch.distributions.Normal(0, 1)
+        self.N.loc = self.N.loc.cuda()  # Get sampling on GPU
+        self.N.scale = self.N.scale.cuda()
+        self.kl = 0
+
+    def forward(self, x: torch.Tensor):
+        x = torch.flatten(x, start_dim=1)
+        x = F.gelu(self.fc1(x))
+        x = F.gelu(self.fc2(x))
+        x = F.gelu(self.fc3(x))
+
+        mu = self.fc4_mu(x)
+        sigma = torch.exp(self.fc4_sigma(x))
+        z = mu + sigma * self.N.sample(mu.shape)
+
+        self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 0.5).sum()
+
+        return z
 
 
 class Decoder(nn.Module):
     def __init__(self, latent_dims):
         super(Decoder, self).__init__()
-        self.fc1 = nn.Linear(latent_dims, 500)
-        self.fc2 = nn.Linear(500, 200)
-        self.fc3 = nn.Linear(200, 28 * 28)
+        self.fc1 = nn.Linear(latent_dims, 256)
+        self.fc2 = nn.Linear(256, 512)
+        self.fc3 = nn.Linear(512, 1024)
+        self.fc4 = nn.Linear(1024, 28 * 28)
 
     def forward(self, x: torch.Tensor):
         x = F.gelu(self.fc1(x))
         x = F.gelu(self.fc2(x))
-        x = F.sigmoid(self.fc3(x))
+        x = F.gelu(self.fc3(x))
+        x = F.sigmoid(self.fc4(x))
         x = x.reshape(-1, 1, 28, 28)
 
         return x
 
 
-class Autoencoder(nn.Module):
+class AutoencoderModule(nn.Module):
+    """Base class for autoencoder and variational autoencoder"""
+
+    encoder: Encoder | VariationalEncoder
+    decoder: Decoder
+
+    def __init__(self):
+        super(AutoencoderModule, self).__init__()
+
+    def loss_fn(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class Autoencoder(AutoencoderModule):
     def __init__(self, latent_dims):
-        super(Autoencoder, self).__init__()
+        super(
+            Autoencoder,
+            self,
+        ).__init__()
 
         self.encoder = Encoder(latent_dims)
         self.decoder = Decoder(latent_dims)
@@ -71,15 +122,33 @@ class Autoencoder(nn.Module):
 
         return x
 
+    def loss_fn(self, x: torch.Tensor, y: torch.Tensor):
+        return ((x - y) ** 2).sum()
+
+
+class VariationalAutoencoder(AutoencoderModule):
+    def __init__(self, latent_dims):
+        super(VariationalAutoencoder, self).__init__()
+
+        self.encoder = VariationalEncoder(latent_dims)
+        self.decoder = Decoder(latent_dims)
+
+    def forward(self, x: torch.Tensor):
+        x = self.encoder(x)
+        x = self.decoder(x)
+
+        return x
+
+    def loss_fn(self, x: torch.Tensor, y: torch.Tensor):
+        return ((x - y) ** 2).sum() + self.encoder.kl
+
 
 def train(
-    model: Autoencoder,
+    model: AutoencoderModule,
     data: DataLoader,
     num_epochs: int = 4,
     learning_rate: float = 0.01,
 ):
-
-    loss_fn = nn.MSELoss()
     optimiser = torch.optim.Adam(params=model.parameters(), lr=learning_rate)
 
     num_iter = len(data)
@@ -96,7 +165,7 @@ def train(
             images = images.to(device)
 
             outputs = model(images)
-            loss = loss_fn(outputs, images)
+            loss = model.loss_fn(outputs, images)
 
             # Optimise in batches (do 1 optim step per [batch_size] images)
             loss.backward()
@@ -107,6 +176,24 @@ def train(
         train_bar.reset()
 
     return model, tracked_loss
+
+
+def avgLoss(model: AutoencoderModule, data: DataLoader):
+    model.eval()
+    # Use a MSE loss when not training, even for variational autoencoder
+    loss_fn = nn.MSELoss() 
+    num_iter = len(data)
+    tracked_loss = torch.zeros((num_iter), requires_grad=False)
+    with torch.no_grad():
+        for idx, (images, labels) in enumerate(data):
+            images = images.to(device)
+            outputs = model(images)
+            loss = loss_fn(outputs, images)
+            tracked_loss[idx] = loss
+
+    avg_loss = torch.mean(tracked_loss)
+
+    return avg_loss.cpu().item()
 
 
 def compareImages(model: nn.Module, data: DataLoader, num_images: int = 10):
@@ -125,7 +212,7 @@ def compareImages(model: nn.Module, data: DataLoader, num_images: int = 10):
     return fig, ax
 
 
-def plotLatentSpace(model: Autoencoder, data: DataLoader, num_batches: int = 100):
+def plotLatentSpace(model: AutoencoderModule, data: DataLoader, num_batches: int = 100):
     model.eval()
     fig, ax = plt.subplots()
     with torch.no_grad():
@@ -142,7 +229,7 @@ def plotLatentSpace(model: Autoencoder, data: DataLoader, num_batches: int = 100
 
 
 def plotReconstructed(
-    model: Autoencoder,
+    model: AutoencoderModule,
     r0: tuple[float, float] = (-5, 10),
     r1: tuple[float, float] = (-10, 5),
     n: int = 12,
@@ -156,22 +243,30 @@ def plotReconstructed(
             x_hat = model.decoder(z)
             x_hat = x_hat.reshape(28, 28).to("cpu").detach().numpy()
             img[(n - 1 - i) * w : (n - 1 - i + 1) * w, j * w : (j + 1) * w] = x_hat
-    plt.imshow(img, extent=[*r0, *r1], cmap = "gray")
+    plt.imshow(img, extent=[*r0, *r1], cmap="gray")
 
-def renderModelGraph(model: nn.Module, data: DataLoader, filepath: str = "network_graph", format: str = "pdf"):
+
+def renderModelGraph(
+    model: nn.Module,
+    data: DataLoader,
+    filepath: str = "network_graph",
+    format: str = "pdf",
+):
     model.eval()
     x, y = iter(data).__next__()
     test_batch = model(x.to(device))
     dot = make_dot(test_batch, params=dict(list(model.named_parameters())))
-    dot.render("network_graph", format="pdf", cleanup=True)
+    dot.render(filepath, format=format, cleanup=True)
+
 
 # <<< Definitions <<<
 
 # Load MNIST training data
-train_loader, test_loader = my_loaders.mnist(batch_size=100)
+train_loader, test_loader = my_loaders.mnist(batch_size=128)
 # Define and train model
-model = Autoencoder(latent_dims=2).to(device)
-model, tracked_loss = train(model, data=train_loader, num_epochs=40, learning_rate=1e-4)
+# model = Autoencoder(latent_dims=2).to(device)
+model = VariationalAutoencoder(latent_dims=2).to(device)
+model, tracked_loss = train(model, data=train_loader, num_epochs=2, learning_rate=1e-3)
 
 # % Diagnostics
 fig, ax = plt.subplots()
@@ -184,4 +279,5 @@ renderModelGraph(model, test_loader)
 
 plt.show()
 
-print(f"Final loss: {tracked_loss[-1] :.3g}")
+print(f"Final train loss: {avgLoss(model, train_loader) :.3g}")
+print(f"Final test loss: {avgLoss(model, test_loader) :.3g}")
