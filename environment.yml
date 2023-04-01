@@ -14,5 +14,7 @@ dependencies:
   - numpy=1.23.5
   - ipython
   - ipykernel
+  - ipywidgets
+  - colorama
   - matplotlib
   - tqdm

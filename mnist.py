@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from tqdm import tqdm, trange
+from tqdm.auto import tqdm, trange
 from time import time, sleep
 import multiprocessing as mp
 
@@ -82,6 +82,8 @@ class MnistNet(nn.Module):
         # No activation function due to the use of Adam optimiser or loss function?
         return x
 
+class MnistConvNet(nn.Module):
+    pass
 
 model = MnistNet().to(device)
 
@@ -94,8 +96,10 @@ num_epochs = 100
 model.train()
 
 num_total_steps = len(train_loader)
-for epoch in trange(num_epochs, desc="Epoch"):
-    for idx, (images, labels) in tqdm(enumerate(train_loader), desc="Iteration"):
+train_bar = tqdm(range(len(train_loader)), desc="Iteration", position=0, leave=False)
+for epoch in trange(num_epochs, desc="Epoch", position=1):
+    for idx, (images, labels) in enumerate(train_loader):
+        train_bar.update(1)
         images = images.reshape(-1, image_size).to(device)
         labels = labels.to(device)
 
@@ -106,6 +110,7 @@ for epoch in trange(num_epochs, desc="Epoch"):
         loss.backward()
         optimiser.step()
         optimiser.zero_grad()
+    train_bar.reset()
 
 
 # %% Test
@@ -128,11 +133,3 @@ with torch.no_grad():
 
         
 
-# %% tqdm test
-
-h = trange(10, desc="Epoch")
-m = trange(5, desc="Iteration")
-
-for _ in h:
-    for __ in m:
-        sleep(0.2)
