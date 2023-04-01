@@ -18,3 +18,5 @@ dependencies:
   - colorama
   - matplotlib
   - tqdm
+  - pip:
+    - torchviz # Requires graphviz (sudo apt install -y graphviz)

@@ -1,5 +1,4 @@
 # %% imports
-import multiprocessing as mp
 from time import sleep, time
 
 import matplotlib.pyplot as plt
@@ -8,13 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-import torchvision.datasets as datasets
-import torchvision.transforms as transforms
+
 import my_loaders
 
 # Run IPython magic commands
 from IPython.core.getipython import get_ipython
-from torch.utils.data import DataLoader
 from tqdm.auto import tqdm, trange
 
 ipython = get_ipython()
@@ -87,17 +84,18 @@ class MnistConvNet(nn.Module):
 model = MnistNet().to(device)
 # model = MnistConvNet().to(device)
 
-loss_func = nn.CrossEntropyLoss()
+loss_fn = nn.CrossEntropyLoss()
 optimiser = torch.optim.Adam(params=model.parameters(), lr=learning_rate)
 
 
 num_epochs = 4
-num_total_steps = len(train_loader) * num_epochs
+num_iter = len(train_loader)
+num_total_steps = num_iter * num_epochs
 
 # Make only 1 bar for the inner iteration, so we can reuse it and not make new ones
-train_bar = tqdm(range(len(train_loader)), desc="Iteration", position=1, leave=False)
+train_bar = tqdm(range(num_iter), desc="Iteration", position=1, leave=False)
 
-tracked_loss = []
+tracked_loss = torch.zeros((num_total_steps), requires_grad=False)
 model.train()
 for epoch in trange(num_epochs, desc="Epoch", position=0):
     for idx, (images, labels) in enumerate(train_loader):
@@ -106,13 +104,14 @@ for epoch in trange(num_epochs, desc="Epoch", position=0):
         labels = labels.to(device)
 
         outputs = model(images)
-        loss = loss_func(outputs, labels)
+        loss = loss_fn(outputs, labels)
 
         # Optimise in batches (do 1 optim step per [batch_size] images)
         loss.backward()
-        tracked_loss.append(loss.item())
         optimiser.step()
-        optimiser.zero_grad()
+        optimiser.zero_grad(set_to_none=True)
+
+        tracked_loss[epoch * num_iter + idx] = loss.detach()
     train_bar.reset()
 
 # Training diagnostics
