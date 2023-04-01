@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torchvision
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import my_loaders
 
 # Run IPython magic commands
 from IPython.core.getipython import get_ipython
@@ -27,32 +28,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # device = "cpu"
 
 # %% Load MNIST training data
-
-# Load and transform to tensor
-train_data = datasets.MNIST(
-    root="./data", train=True, download=True, transform=transforms.ToTensor()
-)
-test_data = datasets.MNIST(
-    root="./data", train=False, download=True, transform=transforms.ToTensor()
-)
-
 # Loaders
 BATCH_SIZE = 100
-# The loading can be a large bottleneck for the training speed. Increase number of workers and pin memory.
-train_loader = DataLoader(
-    dataset=train_data,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    num_workers=mp.cpu_count(),
-    pin_memory=True,
-)
-test_loader = DataLoader(
-    dataset=test_data,
-    batch_size=BATCH_SIZE,
-    shuffle=False,
-    num_workers=mp.cpu_count(),
-    pin_memory=True,
-)
+
+train_loader, test_loader = my_loaders.mnist(BATCH_SIZE)
 
 # Plot
 loaded_test_data = iter(test_loader)
