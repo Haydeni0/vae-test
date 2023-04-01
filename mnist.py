@@ -1,18 +1,20 @@
 # %% imports
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-import torchvision
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-from tqdm.auto import tqdm, trange
-from time import time, sleep
 import multiprocessing as mp
+from time import sleep, time
 
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision
+import torchvision.datasets as datasets
+import torchvision.transforms as transforms
 
 # Run IPython magic commands
 from IPython.core.getipython import get_ipython
+from torch.utils.data import DataLoader
+from tqdm.auto import tqdm, trange
 
 ipython = get_ipython()
 if ipython is not None:
@@ -61,7 +63,7 @@ for i in range(6):
     plt.imshow(example_data[i][0], cmap="gray")
 
 
-# %% Define model
+# %% Define and train model
 image_size = 28 * 28
 num_classes = 10
 learning_rate = 0.01
@@ -71,36 +73,57 @@ class MnistNet(nn.Module):
     def __init__(self):
         super(MnistNet, self).__init__()
 
-        self.FC1 = nn.Linear(image_size, 500)
-        self.act1 = nn.ReLU()
-        self.FC2 = nn.Linear(500, num_classes)
+        self.fc1 = nn.Linear(image_size, 50)
+        self.fc2 = nn.Linear(50, num_classes)
 
-    def forward(self, x):
-        x = self.FC1(x)
-        x = self.act1(x)
-        x = self.FC2(x)
-        # No activation function due to the use of Adam optimiser or loss function?
+    def forward(self, x: torch.Tensor):
+        x = x.reshape(-1, image_size)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        # No activation function due to the use of cross entropy loss
         return x
 
+
 class MnistConvNet(nn.Module):
-    pass
+    def __init__(self):
+        super(MnistConvNet, self).__init__()
+
+        self.conv1 = nn.Conv2d(1, 32, 3, padding="same")
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding="same")
+        self.fc1 = nn.Linear(64 * 7 * 7, num_classes)
+
+    def forward(self, x: torch.Tensor):
+        # Input: [N, 1, 28, 28]
+        x = F.relu(self.conv1(x))  # [N, 32, 28, 28]
+        x = self.pool(x)  # [N, 32, 14, 14]
+        x = F.relu(self.conv2(x))  # [N, 64, 14, 14]
+        x = self.pool(x)  # [N, 64, 7, 7]
+        x = x.reshape(-1, 64 * 7 * 7) # [N, 64*7*7]
+        x = self.fc1(x) # [N, num_classes]
+
+        return x
+
 
 model = MnistNet().to(device)
+# model = MnistConvNet().to(device)
 
 loss_func = nn.CrossEntropyLoss()
 optimiser = torch.optim.Adam(params=model.parameters(), lr=learning_rate)
 
-# %% Train
-num_epochs = 100
 
+num_epochs = 4
+num_total_steps = len(train_loader) * num_epochs
+
+# Make only 1 bar for the inner iteration, so we can reuse it and not make new ones
+train_bar = tqdm(range(len(train_loader)), desc="Iteration", position=1, leave=False)
+
+tracked_loss = []
 model.train()
-
-num_total_steps = len(train_loader)
-train_bar = tqdm(range(len(train_loader)), desc="Iteration", position=0, leave=False)
-for epoch in trange(num_epochs, desc="Epoch", position=1):
+for epoch in trange(num_epochs, desc="Epoch", position=0):
     for idx, (images, labels) in enumerate(train_loader):
         train_bar.update(1)
-        images = images.reshape(-1, image_size).to(device)
+        images = images.to(device)
         labels = labels.to(device)
 
         outputs = model(images)
@@ -108,28 +131,33 @@ for epoch in trange(num_epochs, desc="Epoch", position=1):
 
         # Optimise in batches (do 1 optim step per [batch_size] images)
         loss.backward()
+        tracked_loss.append(loss.item())
         optimiser.step()
         optimiser.zero_grad()
     train_bar.reset()
+
+# Training diagnostics
+
+fig, ax = plt.subplots()
+plt.plot(range(len(tracked_loss)), tracked_loss)
 
 
 # %% Test
 model.eval()
 
+print()
 # Don't compute gradients
 with torch.no_grad():
     num_correct = 0
+    num_samples = len(test_loader.dataset)  # type: ignore
 
     for images, labels in test_loader:
-        images = images.reshape(-1, image_size).to(device)
+        images = images.to(device)
         labels = labels.to(device)
         outputs = model(images)
 
         _, pred_idx = torch.max(outputs, 1)
         num_correct += (pred_idx == labels).sum().item()
-    
-    accuracy = num_correct / len(test_loader)
-    print(f"Accuracy: {accuracy}%")
 
-        
-
+    accuracy = num_correct / num_samples
+    print(f"Accuracy: {accuracy*100}%")
