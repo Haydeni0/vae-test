@@ -28,6 +28,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # device = "cpu"
 
 # >>> Definitions >>>
+
+# Largely based off https://avandekleut.github.io/vae/
+
 class Encoder(nn.Module):
     def __init__(self, latent_dims):
         super(Encoder, self).__init__()
@@ -149,7 +152,7 @@ def train(
     num_epochs: int = 4,
     learning_rate: float = 0.01,
 ):
-    optimiser = torch.optim.Adam(params=model.parameters(), lr=learning_rate)
+    optimiser = torch.optim.AdamW(params=model.parameters(), lr=learning_rate)
 
     num_iter = len(data)
     num_total_steps = num_iter * num_epochs
@@ -169,6 +172,8 @@ def train(
 
             # Optimise in batches (do 1 optim step per [batch_size] images)
             loss.backward()
+            # Clip gradient to stop exploding
+            torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 1e-2)
             optimiser.step()
             optimiser.zero_grad(set_to_none=True)
 
@@ -266,7 +271,7 @@ train_loader, test_loader = my_loaders.mnist(batch_size=128)
 # Define and train model
 # model = Autoencoder(latent_dims=2).to(device)
 model = VariationalAutoencoder(latent_dims=2).to(device)
-model, tracked_loss = train(model, data=train_loader, num_epochs=2, learning_rate=1e-3)
+model, tracked_loss = train(model, data=train_loader, num_epochs=10, learning_rate=1e-3)
 
 # % Diagnostics
 fig, ax = plt.subplots()
