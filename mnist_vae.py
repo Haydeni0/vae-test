@@ -35,25 +35,30 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class Encoder(nn.Module):
-    def __init__(self, latent_dims):
+    def __init__(self, latent_dims:int, dropout_prob:float = 0):
         super(Encoder, self).__init__()
         self.fc1 = nn.Linear(28 * 28, 1024)
         self.fc2 = nn.Linear(1024, 512)
         self.fc3 = nn.Linear(512, 256)
         self.fc4 = nn.Linear(256, latent_dims)
 
+        self.dropout = nn.Dropout(p=dropout_prob)
+
     def forward(self, x: torch.Tensor):
         x = torch.flatten(x, start_dim=1)
         x = F.gelu(self.fc1(x))
+        x = self.dropout(x)
         x = F.gelu(self.fc2(x))
+        x = self.dropout(x)
         x = F.gelu(self.fc3(x))
+        x = self.dropout(x)
         x = self.fc4(x)
 
         return x
 
 
 class VariationalEncoder(nn.Module):
-    def __init__(self, latent_dims):
+    def __init__(self, latent_dims:int, dropout_prob: float = 0):
         super(VariationalEncoder, self).__init__()
         self.fc1 = nn.Linear(28 * 28, 1024)
         self.fc2 = nn.Linear(1024, 512)
@@ -61,17 +66,25 @@ class VariationalEncoder(nn.Module):
         self.fc4_mu = nn.Linear(256, latent_dims)
         self.fc4_sigma = nn.Linear(256, latent_dims)
 
+        self.dropout = nn.Dropout(p=dropout_prob)
+
         self.N = torch.distributions.Normal(0, 1)
         if device.type == "cuda":
-            self.N.loc = self.N.loc.cuda()  # Hack to get sampling on GPU
+            # Hack to get sampling on GPU
+            self.N.loc = self.N.loc.cuda()  
             self.N.scale = self.N.scale.cuda()
         self.kl = 0
 
     def forward(self, x: torch.Tensor):
         x = torch.flatten(x, start_dim=1)
+        x = self.dropout(x)
         x = F.gelu(self.fc1(x))
+        x = self.dropout(x)
         x = F.gelu(self.fc2(x))
+        x = self.dropout(x)
         x = F.gelu(self.fc3(x))
+        x = self.dropout(x)
+
 
         mu = self.fc4_mu(x)
         sigma = torch.exp(self.fc4_sigma(x))
@@ -83,17 +96,22 @@ class VariationalEncoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, latent_dims):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(Decoder, self).__init__()
         self.fc1 = nn.Linear(latent_dims, 256)
         self.fc2 = nn.Linear(256, 512)
         self.fc3 = nn.Linear(512, 1024)
         self.fc4 = nn.Linear(1024, 28 * 28)
 
+        self.dropout = nn.Dropout(p=dropout_prob)
+
     def forward(self, x: torch.Tensor):
         x = F.gelu(self.fc1(x))
+        x = self.dropout(x)
         x = F.gelu(self.fc2(x))
+        x = self.dropout(x)
         x = F.gelu(self.fc3(x))
+        x = self.dropout(x)
         x = F.sigmoid(self.fc4(x))
         x = x.reshape(-1, 1, 28, 28)
 
@@ -114,14 +132,14 @@ class AutoencoderModule(nn.Module):
 
 
 class Autoencoder(AutoencoderModule):
-    def __init__(self, latent_dims):
+    def __init__(self, latent_dims: int, dropout_prob:float = 0):
         super(
             Autoencoder,
             self,
         ).__init__()
 
-        self.encoder = Encoder(latent_dims)
-        self.decoder = Decoder(latent_dims)
+        self.encoder = Encoder(latent_dims, dropout_prob=dropout_prob)
+        self.decoder = Decoder(latent_dims, dropout_prob=dropout_prob)
 
     def forward(self, x: torch.Tensor):
         x = self.encoder(x)
@@ -134,11 +152,11 @@ class Autoencoder(AutoencoderModule):
 
 
 class VariationalAutoencoder(AutoencoderModule):
-    def __init__(self, latent_dims):
+    def __init__(self, latent_dims: int, dropout_prob:float = 0):
         super(VariationalAutoencoder, self).__init__()
 
-        self.encoder = VariationalEncoder(latent_dims)
-        self.decoder = Decoder(latent_dims)
+        self.encoder = VariationalEncoder(latent_dims, dropout_prob=dropout_prob)
+        self.decoder = Decoder(latent_dims, dropout_prob=dropout_prob)
 
     def forward(self, x: torch.Tensor):
         x = self.encoder(x)
@@ -274,7 +292,7 @@ def renderModelGraph(
 train_loader, test_loader = my_loaders.mnist(batch_size=128)
 # Define and train model
 # model = Autoencoder(latent_dims=2).to(device)
-model = VariationalAutoencoder(latent_dims=2).to(device)
+model = VariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
 model, tracked_loss = train(model, data=train_loader, num_epochs=10, learning_rate=1e-3)
 
 # % Diagnostics
@@ -283,7 +301,7 @@ plt.plot(range(len(tracked_loss)), tracked_loss)
 
 compareImages(model, test_loader)
 plotLatentSpace(model, test_loader)
-plotReconstructed(model, (-5, 5), (-5, 5), 20)
+plotReconstructed(model, (-2, 2), (-2, 2), 20)
 renderModelGraph(model, test_loader)
 
 plt.show()
