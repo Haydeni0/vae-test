@@ -20,7 +20,7 @@ from torchviz import make_dot
 from tqdm.auto import tqdm, trange
 
 import my_loaders
-from mnist_networks import Autoencoder, AutoencoderModule, VariationalAutoencoder
+from mnist_networks import Autoencoder, AutoencoderModule, VariationalAutoencoder, ConvolutionalVariationalAutoencoder
 
 torch.backends.cudnn.benchmark = True
 
@@ -124,13 +124,13 @@ def avgAutoencoderLoss(
 def compareImages(model: nn.Module, data: DataLoader, num_images: int = 10):
     model.eval()
     # Plot imput images compared to reconstructed images
-    image = iter(data).__next__()[0][:num_images].reshape(-1, 28, 28)
+    image = iter(data).__next__()[0][:num_images].reshape(-1, 1, 28, 28)
     with torch.no_grad():
         predicted_image = model(image.to(device))
     fig, ax = plt.subplots(2, num_images)
     for img_idx in range(num_images):
         plt.subplot(2, num_images, img_idx + 1)
-        plt.imshow(image[img_idx], cmap="gray")
+        plt.imshow(image[img_idx,0], cmap="gray")
         plt.subplot(2, num_images, num_images + img_idx + 1)
         plt.imshow(predicted_image[img_idx].cpu().reshape(28, 28), cmap="gray")
 
@@ -190,7 +190,8 @@ def renderModelGraph(
 train_loader, test_loader = my_loaders.mnist(batch_size=128)
 # Define and train model
 # model = Autoencoder(latent_dims=2).to(device)
-model = VariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
+# model = VariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
+model = ConvolutionalVariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
 model, training_diagnostics = trainAutoencoder(
     model,
     data=train_loader,
@@ -206,7 +207,6 @@ plt.subplot(2, 1, 1)
 plt.plot(range(training_diagnostics.num_total_steps), training_diagnostics.tracked_loss)
 plt.xlabel("step")
 plt.ylabel("loss")
-plt.ylim((0, 10000))
 plt.subplot(2, 1, 2)
 plt.plot(range(training_diagnostics.num_total_steps), training_diagnostics.tracked_lr)
 plt.xlabel("step")

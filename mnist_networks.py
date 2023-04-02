@@ -76,6 +76,45 @@ class VariationalEncoder(nn.Module):
         return z
 
 
+class ConvolutionalVariationalEncoder(nn.Module):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
+        super(ConvolutionalVariationalEncoder, self).__init__()
+        self.pool = nn.MaxPool2d(2,2)
+        self.conv1 = nn.Conv2d(1, 32, 3, padding="same")
+        self.conv2 = nn.Conv2d(32, 32, 3, padding="same")
+        self.fc_mu = nn.Linear(32*7*7, latent_dims)
+        self.fc_sigma = nn.Linear(32*7*7, latent_dims)
+
+        self.dropout = nn.Dropout(p=dropout_prob)
+
+        self.N = torch.distributions.Normal(0, 1)
+        
+        self.kl = 0
+
+    def forward(self, x: torch.Tensor):
+        if x.get_device() >= 0:
+            # Hack to get sampling on GPU
+            self.N.loc = self.N.loc.cuda()
+            self.N.scale = self.N.scale.cuda()
+
+        # [N, 1, 28, 28]
+        x = self.dropout(x)
+        x = F.gelu(self.conv1(x)) # [N, 32, 28, 28]
+        x = self.pool(x) # [N, 32, 14, 14]
+        x = self.dropout(x)
+        x = F.gelu(self.conv2(x)) # [N, 32, 14, 14]
+        x = self.pool(x) # [N, 32, 7, 7]
+        x = self.dropout(x)
+        x = torch.flatten(x, 1) # [N, 32*7*7]
+
+        mu = self.fc_mu(x)
+        sigma = torch.exp(self.fc_sigma(x))
+        z = mu + sigma * self.N.sample(mu.shape)
+
+        self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 0.5).sum()
+
+        return z
+
 class Decoder(nn.Module):
     def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(Decoder, self).__init__()
@@ -98,12 +137,40 @@ class Decoder(nn.Module):
 
         return x
 
+class ConvolutionalDecoder(nn.Module):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
+        super(ConvolutionalDecoder, self).__init__()
+
+        self.fc = nn.Linear(latent_dims, 32*7*7)
+        self.conv1 = nn.Conv2d(32, 32, 3, padding="same")
+        self.conv2 = nn.Conv2d(32, 1, 3, padding="same")
+
+        self.upsample1 = nn.Upsample(scale_factor=2)
+        self.upsample2 = nn.Upsample(scale_factor=2)
+
+        self.dropout = nn.Dropout(p=dropout_prob)
+
+    def forward(self, x: torch.Tensor):
+        # [N, latent_dims]
+        x = self.dropout(x)
+        x = F.gelu(self.fc(x)) # [N, 32*7*7]
+        x = x.reshape(-1, 32, 7, 7) # [N, 32, 7, 7]
+        x = self.dropout(x)
+        x = F.gelu(self.conv1(x)) # [N, 32, 7, 7]
+        x = self.upsample1(x) # [N, 32, 14, 14]
+        x = self.dropout(x)
+        x = F.gelu(self.conv2(x)) # [N, 1, 14, 14]
+        x = self.upsample2(x) # [N, 1, 28, 28]
+
+        return x
+
+
 
 class AutoencoderModule(nn.Module):
     """Base class for autoencoder and variational autoencoder"""
 
-    encoder: Encoder | VariationalEncoder
-    decoder: Decoder
+    encoder: Encoder | VariationalEncoder | ConvolutionalVariationalEncoder
+    decoder: Decoder | ConvolutionalDecoder
 
     def __init__(self):
         super(AutoencoderModule, self).__init__()
@@ -138,6 +205,22 @@ class VariationalAutoencoder(AutoencoderModule):
 
         self.encoder = VariationalEncoder(latent_dims, dropout_prob=dropout_prob)
         self.decoder = Decoder(latent_dims, dropout_prob=dropout_prob)
+
+    def forward(self, x: torch.Tensor):
+        x = self.encoder(x)
+        x = self.decoder(x)
+
+        return x
+
+    def loss_fn(self, x: torch.Tensor, y: torch.Tensor):
+        return ((x - y) ** 2).sum() + self.encoder.kl
+    
+class ConvolutionalVariationalAutoencoder(AutoencoderModule):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
+        super(ConvolutionalVariationalAutoencoder, self).__init__()
+
+        self.encoder = ConvolutionalVariationalEncoder(latent_dims, dropout_prob=dropout_prob)
+        self.decoder = ConvolutionalDecoder(latent_dims, dropout_prob=dropout_prob)
 
     def forward(self, x: torch.Tensor):
         x = self.encoder(x)
