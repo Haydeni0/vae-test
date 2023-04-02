@@ -12,4 +12,6 @@
 - Play with learning rate scheduler
 - Try more difficult problems
 - Regularisation
-  - batchnorm
+  - Dropout
+- Batch norm
+  - [Disable bias for convolutions directly followed by batch norm](https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#disable-bias-for-convolutions-directly-followed-by-a-batch-norm)

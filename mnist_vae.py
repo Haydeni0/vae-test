@@ -4,16 +4,18 @@ from time import sleep, time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.backends.cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+
+torch.backends.cudnn.benchmark = True
 
 # Run IPython magic commands
 from IPython.core.getipython import get_ipython
 from torch.utils.data import DataLoader
 from torchviz import make_dot
 from tqdm.auto import tqdm, trange
-
 
 import my_loaders
 
@@ -25,11 +27,12 @@ if ipython is not None:
 
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# device = "cpu"
+# device = torch.device("cpu")
 
 # >>> Definitions >>>
 
 # Largely based off https://avandekleut.github.io/vae/
+
 
 class Encoder(nn.Module):
     def __init__(self, latent_dims):
@@ -59,8 +62,9 @@ class VariationalEncoder(nn.Module):
         self.fc4_sigma = nn.Linear(256, latent_dims)
 
         self.N = torch.distributions.Normal(0, 1)
-        self.N.loc = self.N.loc.cuda()  # Get sampling on GPU
-        self.N.scale = self.N.scale.cuda()
+        if device.type == "cuda":
+            self.N.loc = self.N.loc.cuda()  # Hack to get sampling on GPU
+            self.N.scale = self.N.scale.cuda()
         self.kl = 0
 
     def forward(self, x: torch.Tensor):
@@ -163,12 +167,12 @@ def train(
     tracked_loss = torch.zeros((num_total_steps), requires_grad=False)
     model.train()
     for epoch in trange(num_epochs, desc="Epoch", position=0):
-        for idx, (images, labels) in enumerate(data):
+        for idx, (inputs, targets) in enumerate(data):
             train_bar.update(1)
-            images = images.to(device)
+            inputs = inputs.to(device)
 
-            outputs = model(images)
-            loss = model.loss_fn(outputs, images)
+            outputs = model(inputs)
+            loss = model.loss_fn(outputs, inputs)
 
             # Optimise in batches (do 1 optim step per [batch_size] images)
             loss.backward()
@@ -186,14 +190,14 @@ def train(
 def avgLoss(model: AutoencoderModule, data: DataLoader):
     model.eval()
     # Use a MSE loss when not training, even for variational autoencoder
-    loss_fn = nn.MSELoss() 
+    loss_fn = nn.MSELoss()
     num_iter = len(data)
     tracked_loss = torch.zeros((num_iter), requires_grad=False)
     with torch.no_grad():
-        for idx, (images, labels) in enumerate(data):
-            images = images.to(device)
-            outputs = model(images)
-            loss = loss_fn(outputs, images)
+        for idx, (inputs, targets) in enumerate(data):
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            loss = loss_fn(outputs, inputs)
             tracked_loss[idx] = loss
 
     avg_loss = torch.mean(tracked_loss)
