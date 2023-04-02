@@ -15,3 +15,4 @@
   - Dropout
 - Batch norm
   - [Disable bias for convolutions directly followed by batch norm](https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#disable-bias-for-convolutions-directly-followed-by-a-batch-norm)
+- Track optimizer information like update norm, gradient norm, norm of momentum term, angle between them etc.

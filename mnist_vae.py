@@ -8,6 +8,7 @@ import torch.backends.cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+from dataclasses import dataclass
 
 torch.backends.cudnn.benchmark = True
 
@@ -35,7 +36,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class Encoder(nn.Module):
-    def __init__(self, latent_dims:int, dropout_prob:float = 0):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(Encoder, self).__init__()
         self.fc1 = nn.Linear(28 * 28, 1024)
         self.fc2 = nn.Linear(1024, 512)
@@ -58,7 +59,7 @@ class Encoder(nn.Module):
 
 
 class VariationalEncoder(nn.Module):
-    def __init__(self, latent_dims:int, dropout_prob: float = 0):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(VariationalEncoder, self).__init__()
         self.fc1 = nn.Linear(28 * 28, 1024)
         self.fc2 = nn.Linear(1024, 512)
@@ -71,7 +72,7 @@ class VariationalEncoder(nn.Module):
         self.N = torch.distributions.Normal(0, 1)
         if device.type == "cuda":
             # Hack to get sampling on GPU
-            self.N.loc = self.N.loc.cuda()  
+            self.N.loc = self.N.loc.cuda()
             self.N.scale = self.N.scale.cuda()
         self.kl = 0
 
@@ -84,7 +85,6 @@ class VariationalEncoder(nn.Module):
         x = self.dropout(x)
         x = F.gelu(self.fc3(x))
         x = self.dropout(x)
-
 
         mu = self.fc4_mu(x)
         sigma = torch.exp(self.fc4_sigma(x))
@@ -132,7 +132,7 @@ class AutoencoderModule(nn.Module):
 
 
 class Autoencoder(AutoencoderModule):
-    def __init__(self, latent_dims: int, dropout_prob:float = 0):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(
             Autoencoder,
             self,
@@ -152,7 +152,7 @@ class Autoencoder(AutoencoderModule):
 
 
 class VariationalAutoencoder(AutoencoderModule):
-    def __init__(self, latent_dims: int, dropout_prob:float = 0):
+    def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(VariationalAutoencoder, self).__init__()
 
         self.encoder = VariationalEncoder(latent_dims, dropout_prob=dropout_prob)
@@ -168,13 +168,23 @@ class VariationalAutoencoder(AutoencoderModule):
         return ((x - y) ** 2).sum() + self.encoder.kl
 
 
+@dataclass
+class TrainingDiagnostics:
+    num_total_steps: int
+    tracked_loss: torch.Tensor
+    tracked_lr: torch.Tensor
+
+
 def train(
     model: AutoencoderModule,
     data: DataLoader,
     num_epochs: int = 4,
     learning_rate: float = 0.01,
-):
+    learning_rate_T_0: int = 10,
+    clip_grad_max_norm: float = 1e9
+) -> tuple[AutoencoderModule, TrainingDiagnostics]:
     optimiser = torch.optim.AdamW(params=model.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimiser, T_0=learning_rate_T_0)
 
     num_iter = len(data)
     num_total_steps = num_iter * num_epochs
@@ -183,6 +193,7 @@ def train(
     train_bar = tqdm(range(num_iter), desc="Iteration", position=1, leave=False)
 
     tracked_loss = torch.zeros((num_total_steps), requires_grad=False)
+    tracked_lr = torch.zeros((num_total_steps), requires_grad=False)
     model.train()
     for epoch in trange(num_epochs, desc="Epoch", position=0):
         for idx, (inputs, targets) in enumerate(data):
@@ -195,14 +206,23 @@ def train(
             # Optimise in batches (do 1 optim step per [batch_size] images)
             loss.backward()
             # Clip gradient to stop exploding
-            torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 1e-2)
+            torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), clip_grad_max_norm)
             optimiser.step()
             optimiser.zero_grad(set_to_none=True)
 
             tracked_loss[epoch * num_iter + idx] = loss.detach()
-        train_bar.reset()
+            tracked_lr[epoch * num_iter + idx] = optimiser.param_groups[0]["lr"]
 
-    return model, tracked_loss
+        train_bar.reset()
+        scheduler.step()
+
+    training_diagnostics = TrainingDiagnostics(
+        num_total_steps=num_total_steps,
+        tracked_loss=tracked_loss,
+        tracked_lr=tracked_lr,
+    )
+
+    return model, training_diagnostics
 
 
 def avgLoss(model: AutoencoderModule, data: DataLoader):
@@ -293,12 +313,27 @@ train_loader, test_loader = my_loaders.mnist(batch_size=128)
 # Define and train model
 # model = Autoencoder(latent_dims=2).to(device)
 model = VariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
-model, tracked_loss = train(model, data=train_loader, num_epochs=10, learning_rate=1e-3)
+model, training_diagnostics = train(
+    model, data=train_loader, num_epochs=100, learning_rate=1e-3, clip_grad_max_norm=1e-4
+)
 
 # % Diagnostics
-fig, ax = plt.subplots()
-plt.plot(range(len(tracked_loss)), tracked_loss)
+fig, ax = plt.subplots(2, 1)
+plt.subplot(2, 1, 1)
+plt.plot(
+    range(training_diagnostics.num_total_steps), training_diagnostics.tracked_loss
+)
+plt.xlabel("step")
+plt.ylabel("loss")
+plt.ylim((0, 10000))
+plt.subplot(2, 1, 2)
+plt.plot(
+    range(training_diagnostics.num_total_steps), training_diagnostics.tracked_lr
+)
+plt.xlabel("step")
+plt.ylabel("learning rate")
 
+# %
 compareImages(model, test_loader)
 plotLatentSpace(model, test_loader)
 plotReconstructed(model, (-2, 2), (-2, 2), 20)
