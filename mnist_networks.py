@@ -80,10 +80,11 @@ class ConvolutionalVariationalEncoder(nn.Module):
     def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(ConvolutionalVariationalEncoder, self).__init__()
         self.pool = nn.MaxPool2d(2,2)
-        self.conv1 = nn.Conv2d(1, 32, 3, padding="same")
-        self.conv2 = nn.Conv2d(32, 32, 3, padding="same")
-        self.fc_mu = nn.Linear(32*7*7, latent_dims)
-        self.fc_sigma = nn.Linear(32*7*7, latent_dims)
+        self.conv1 = nn.Conv2d(1, 64, 7, padding="same")
+        self.conv2 = nn.Conv2d(64, 32, 7, padding="same")
+        self.fc1 = nn.Linear(32*7*7, 256)
+        self.fc_mu = nn.Linear(256, latent_dims)
+        self.fc_sigma = nn.Linear(256, latent_dims)
 
         self.dropout = nn.Dropout(p=dropout_prob)
 
@@ -101,11 +102,14 @@ class ConvolutionalVariationalEncoder(nn.Module):
         x = self.dropout(x)
         x = F.gelu(self.conv1(x)) # [N, 32, 28, 28]
         x = self.pool(x) # [N, 32, 14, 14]
+
         x = self.dropout(x)
         x = F.gelu(self.conv2(x)) # [N, 32, 14, 14]
         x = self.pool(x) # [N, 32, 7, 7]
-        x = self.dropout(x)
         x = torch.flatten(x, 1) # [N, 32*7*7]
+
+        x = self.dropout(x) # [N, 256]
+        x = F.gelu(self.fc1(x))
 
         mu = self.fc_mu(x)
         sigma = torch.exp(self.fc_sigma(x))
@@ -141,9 +145,11 @@ class ConvolutionalDecoder(nn.Module):
     def __init__(self, latent_dims: int, dropout_prob: float = 0):
         super(ConvolutionalDecoder, self).__init__()
 
-        self.fc = nn.Linear(latent_dims, 32*7*7)
-        self.conv1 = nn.Conv2d(32, 32, 3, padding="same")
-        self.conv2 = nn.Conv2d(32, 1, 3, padding="same")
+        self.fc1 = nn.Linear(latent_dims, 256)
+        self.fc2 = nn.Linear(256, 32*7*7)
+        self.conv1 = nn.Conv2d(32, 64, 7, padding="same")
+        self.conv2 = nn.Conv2d(64, 32, 7, padding="same")
+        self.conv3 = nn.Conv2d(32, 1, 7, padding="same")
 
         self.upsample1 = nn.Upsample(scale_factor=2)
         self.upsample2 = nn.Upsample(scale_factor=2)
@@ -153,14 +159,21 @@ class ConvolutionalDecoder(nn.Module):
     def forward(self, x: torch.Tensor):
         # [N, latent_dims]
         x = self.dropout(x)
-        x = F.gelu(self.fc(x)) # [N, 32*7*7]
+        x = F.gelu(self.fc1(x)) # [N, 256]
+
+        x = self.dropout(x)
+        x = F.gelu(self.fc2(x)) # [N, 32*7*7]
         x = x.reshape(-1, 32, 7, 7) # [N, 32, 7, 7]
+
         x = self.dropout(x)
-        x = F.gelu(self.conv1(x)) # [N, 32, 7, 7]
-        x = self.upsample1(x) # [N, 32, 14, 14]
+        x = F.gelu(self.conv1(x)) # [N, 64, 7, 7]
+        x = self.upsample1(x) # [N, 64, 14, 14]
         x = self.dropout(x)
-        x = F.gelu(self.conv2(x)) # [N, 1, 14, 14]
-        x = self.upsample2(x) # [N, 1, 28, 28]
+        x = F.gelu(self.conv2(x)) # [N, 32, 14, 14]
+        x = self.upsample2(x) # [N, 32, 28, 28]
+
+        x = self.dropout(x)
+        x = F.gelu(self.conv3(x)) # [N, 1, 28, 28]
 
         return x
 

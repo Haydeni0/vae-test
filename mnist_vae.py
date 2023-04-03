@@ -197,7 +197,7 @@ model, training_diagnostics = trainAutoencoder(
     data=train_loader,
     num_epochs=2,
     learning_rate=1e-3,
-    clip_grad_max_norm=1e-4,
+    clip_grad_max_norm=1e4,
     loss_fn=model.loss_fn,
 )
 
