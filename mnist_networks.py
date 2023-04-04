@@ -233,7 +233,8 @@ class ConvolutionalVariationalAutoencoder(AutoencoderModule):
         super(ConvolutionalVariationalAutoencoder, self).__init__()
 
         self.encoder = ConvolutionalVariationalEncoder(latent_dims, dropout_prob=dropout_prob)
-        self.decoder = ConvolutionalDecoder(latent_dims, dropout_prob=dropout_prob)
+        # Seems to have less blurry images with regular decoder
+        self.decoder = Decoder(latent_dims, dropout_prob=dropout_prob)
 
     def forward(self, x: torch.Tensor):
         x = self.encoder(x)
