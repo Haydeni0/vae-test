@@ -10,6 +10,8 @@ import torchvision
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
+from typing import Type
+
 # Run IPython magic commands
 from IPython.core.getipython import get_ipython
 from torch.utils.data import DataLoader
@@ -22,16 +24,11 @@ if ipython is not None:
     ipython.run_line_magic("autoreload", "2")
 
 
-def mnist(batch_size: int) -> tuple[DataLoader, DataLoader]:
-    """Create loaders for MNIST dataset"""
-
-    # Load and transform to tensor
-    train_data = datasets.MNIST(
-        root="./data", train=True, download=True, transform=transforms.ToTensor()
-    )
-    test_data = datasets.MNIST(
-        root="./data", train=False, download=True, transform=transforms.ToTensor()
-    )
+def makeLoaders(
+    train_data: datasets.VisionDataset,
+    test_data: datasets.VisionDataset,
+    batch_size: int,
+) -> tuple[DataLoader, DataLoader]:
 
     # Loaders
     # The loading can be a large bottleneck for the training speed. Increase number of workers and pin memory.
@@ -51,3 +48,34 @@ def mnist(batch_size: int) -> tuple[DataLoader, DataLoader]:
     )
 
     return train_loader, test_loader
+
+
+def mnist(batch_size: int) -> tuple[DataLoader, DataLoader]:
+    """Create loaders for MNIST dataset"""
+
+    # Load and transform to tensor
+    train_data = datasets.MNIST(
+        root="./data", train=True, download=True, transform=transforms.ToTensor()
+    )
+    test_data = datasets.MNIST(
+        root="./data", train=False, download=True, transform=transforms.ToTensor()
+    )
+
+    return makeLoaders(
+        train_data=train_data, test_data=test_data, batch_size=batch_size
+    )
+
+def fashion_mnist(batch_size: int) -> tuple[DataLoader, DataLoader]:
+    """Create loaders for MNIST dataset"""
+
+    # Load and transform to tensor
+    train_data = datasets.FashionMNIST(
+        root="./data", train=True, download=True, transform=transforms.ToTensor()
+    )
+    test_data = datasets.FashionMNIST(
+        root="./data", train=False, download=True, transform=transforms.ToTensor()
+    )
+
+    return makeLoaders(
+        train_data=train_data, test_data=test_data, batch_size=batch_size
+    )

@@ -187,18 +187,21 @@ def renderModelGraph(
 # <<< Definitions <<<
 
 # Load MNIST training data
-train_loader, test_loader = my_loaders.mnist(batch_size=128)
+# train_loader, test_loader = my_loaders.mnist(batch_size=128)
+train_loader, test_loader = my_loaders.fashion_mnist(batch_size=128)
 # Define and train model
 # model = Autoencoder(latent_dims=2).to(device)
 # model = VariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
 model = ConvolutionalVariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
+# %
 model, training_diagnostics = trainAutoencoder(
     model,
     data=train_loader,
-    num_epochs=2,
+    num_epochs=20,
     learning_rate=1e-3,
-    clip_grad_max_norm=1e4,
+    clip_grad_max_norm=1e-3,
     loss_fn=model.loss_fn,
+    learning_rate_T_0=3
 )
 
 # % Diagnostics
