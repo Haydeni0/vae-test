@@ -79,3 +79,18 @@ def fashion_mnist(batch_size: int) -> tuple[DataLoader, DataLoader]:
     return makeLoaders(
         train_data=train_data, test_data=test_data, batch_size=batch_size
     )
+
+def emnist(batch_size: int, split: str = "byclass") -> tuple[DataLoader, DataLoader]:
+    """Create loaders for MNIST dataset"""
+
+    # Load and transform to tensor
+    train_data = datasets.EMNIST(
+        root="./data", split=split,train=True, download=True, transform=transforms.ToTensor()
+    )
+    test_data = datasets.EMNIST(
+        root="./data", split=split, train=False, download=True, transform=transforms.ToTensor()
+    )
+
+    return makeLoaders(
+        train_data=train_data, test_data=test_data, batch_size=batch_size
+    )

@@ -188,7 +188,8 @@ def renderModelGraph(
 
 # Load MNIST training data
 # train_loader, test_loader = my_loaders.mnist(batch_size=128)
-train_loader, test_loader = my_loaders.fashion_mnist(batch_size=128)
+# train_loader, test_loader = my_loaders.fashion_mnist(batch_size=128)
+train_loader, test_loader = my_loaders.emnist(batch_size=128)
 # Define and train model
 # model = Autoencoder(latent_dims=2).to(device)
 # model = VariationalAutoencoder(latent_dims=2, dropout_prob=0).to(device)
